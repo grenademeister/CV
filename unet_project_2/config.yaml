@@ -1,0 +1,68 @@
+# config.yaml
+
+# Configuration version (for schema validation)
+version: 1.0
+
+# Device selection
+device: cuda:0
+
+# Paths to datasets
+data:
+  train_path: ./data_pet
+  val_path:   ./data_pet
+
+image_size: [224, 224]  # Resize images to this size
+
+# Model specification
+model:
+  params:
+    n_channels: 3
+    n_classes: 3
+
+# loss function
+loss:
+  type: "BCEWithLogitsLoss"
+  params: {}
+
+# Optimizer settings
+optimizer:
+  type: Adam
+  params:
+    lr:           0.0005
+    weight_decay: 0.0001
+
+# Learning‐rate scheduler (optional)
+scheduler:
+  type: StepLR
+  params:
+    step_size: 25
+    gamma: 0.5 
+
+# Training parameters
+training:
+  epochs:                     100
+  batch_size:                 32
+  num_workers:                1
+  resume:                     false
+  early_stopping_patience:    10
+
+# Logging & checkpointing
+logging:
+  log_dir:        ./var/logs
+  checkpoint_dir: ./var/checkpoints
+  checkpoint_save_interval: 5
+  level:          INFO
+  log_interval:   50
+  structured:     true      # emit JSON‐formatted logs
+  format:         json
+
+# Metrics to compute and track
+metrics:
+  report:       [accuracy, precision, recall]
+  save_history: true
+
+# Hyperparameter sweep definitions
+# sweep:
+#   optimizer.params.lr:       0.0005
+#   training.batch_size:       32
+

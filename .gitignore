@@ -1,7 +1,9 @@
 /unet_project/__pycache__/
 /unet_project/tex
 /unet_project/data/
-/unet_project2/__pycache__/
+
+/unet_project_2/__pycache__/
+/unet_project_2/data_pet/*
 
 *.log
 *.pth
