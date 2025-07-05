@@ -40,7 +40,7 @@ scheduler:
 
 # Training parameters
 training:
-  epochs:                     100
+  epochs:                     50
   batch_size:                 32
   num_workers:                1
   resume:                     false

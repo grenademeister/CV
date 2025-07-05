@@ -9,3 +9,5 @@
 *.pth
 *.tar.gz
 *.zip
+
+nohup.out

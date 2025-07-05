@@ -275,6 +275,40 @@ class SegmentationMetrics:
         return " | ".join(summary)
 
 
+class SimpleSegmentationMetrics:
+    def __init__(self, num_classes: int):
+        self.num_classes = num_classes
+        self.reset()
+
+    def reset(self):
+        self.confusion_matrix = torch.zeros(self.num_classes, self.num_classes)
+
+    def update(self, preds: torch.Tensor, targets: torch.Tensor):
+        preds = torch.argmax(preds, dim=1) if preds.dim() == 4 else preds
+        targets = torch.argmax(targets, dim=1) if targets.dim() == 4 else targets
+        preds = preds.flatten()
+        targets = targets.flatten()
+        mask = (targets >= 0) & (targets < self.num_classes)
+        preds = preds[mask]
+        targets = targets[mask]
+        indices = targets * self.num_classes + preds
+        cm = torch.bincount(indices, minlength=self.num_classes**2)
+        self.confusion_matrix += cm.view(self.num_classes, self.num_classes)
+
+    def compute(self):
+        cm = self.confusion_matrix
+        acc = cm.trace() / cm.sum() if cm.sum() > 0 else 0.0
+        iou = []
+        for i in range(self.num_classes):
+            tp = cm[i, i]
+            fp = cm[:, i].sum() - tp
+            fn = cm[i, :].sum() - tp
+            denom = tp + fp + fn
+            iou.append(tp / denom if denom > 0 else 0.0)
+        mean_iou = sum(iou) / self.num_classes
+        return {"pixel_accuracy": acc.item(), "mean_iou": mean_iou.item()}
+
+
 class MetricsCallback(Callback):
     """
     Callback to compute and log segmentation metrics during training
@@ -283,8 +317,8 @@ class MetricsCallback(Callback):
     def __init__(self, num_classes: int, class_names: List[str] = None):
         self.num_classes = num_classes
         self.class_names = class_names or ["Background", "Unknown", "Foreground"]
-        self.train_metrics = SegmentationMetrics(num_classes, class_names)
-        self.val_metrics = SegmentationMetrics(num_classes, class_names)
+        self.train_metrics = SimpleSegmentationMetrics(num_classes, class_names)
+        self.val_metrics = SimpleSegmentationMetrics(num_classes, class_names)
 
     def on_epoch_begin(self, trainer, epoch):
         """Reset metrics at the beginning of each epoch"""
