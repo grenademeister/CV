@@ -3,6 +3,8 @@ import torch
 import torch.nn.functional as F
 from typing import Dict, List
 
+from seg import SegmentationMetrics
+
 
 # === Callback system ===
 class Callback:
@@ -155,160 +157,6 @@ class ModelCheckpoint(Callback):
             )
 
 
-class SegmentationMetrics:
-    """
-    Segmentation metrics calculator for multi-class segmentation.
-    Computes pixel accuracy, mean IoU, and per-class IoU.
-    """
-
-    def __init__(self, num_classes: int, class_names: List[str] = None):
-        self.num_classes = num_classes
-        self.class_names = class_names or [f"Class_{i}" for i in range(num_classes)]
-        self.reset()
-
-    def reset(self):
-        """Reset all accumulated metrics"""
-        self.confusion_matrix = torch.zeros(self.num_classes, self.num_classes)
-        self.total_pixels = 0
-        self.correct_pixels = 0
-
-    def update(self, preds: torch.Tensor, targets: torch.Tensor):
-        """
-        Update metrics with batch predictions and targets
-
-        Args:
-            preds: Model predictions [B, C, H, W] (logits)
-            targets: Ground truth [B, H, W] (class indices) or [B, C, H, W] (one-hot)
-        """
-        # Convert predictions to class indices
-        if preds.dim() == 4:  # [B, C, H, W]
-            pred_classes = torch.argmax(preds, dim=1)  # [B, H, W]
-        else:
-            pred_classes = preds
-
-        # Convert targets to class indices if one-hot
-        if targets.dim() == 4:  # [B, C, H, W] one-hot
-            target_classes = torch.argmax(targets, dim=1)  # [B, H, W]
-        else:
-            target_classes = targets
-
-        # Flatten for easier computation
-        pred_flat = pred_classes.flatten()
-        target_flat = target_classes.flatten()
-
-        # Update pixel accuracy
-        correct = (pred_flat == target_flat).sum().item()
-        total = pred_flat.numel()
-        self.correct_pixels += correct
-        self.total_pixels += total
-
-        # FIXED: Replace slow loop with vectorized confusion matrix update
-        # Create mask for valid predictions (within class range)
-        valid_mask = (
-            (target_flat >= 0)
-            & (target_flat < self.num_classes)
-            & (pred_flat >= 0)
-            & (pred_flat < self.num_classes)
-        )
-
-        valid_targets = target_flat[valid_mask]
-        valid_preds = pred_flat[valid_mask]
-
-        # Vectorized confusion matrix update using bincount
-        if len(valid_targets) > 0:
-            indices = valid_targets * self.num_classes + valid_preds
-            cm_flat = torch.bincount(indices, minlength=self.num_classes**2)
-            cm_update = cm_flat.view(self.num_classes, self.num_classes).float()
-            self.confusion_matrix += cm_update
-
-    def compute(self) -> Dict[str, float]:
-        """Compute all metrics"""
-        metrics = {}
-
-        # Pixel Accuracy
-        pixel_acc = (
-            (self.correct_pixels / self.total_pixels) * 100
-            if self.total_pixels > 0
-            else 0.0
-        )
-        metrics["pixel_accuracy"] = pixel_acc
-
-        # Per-class IoU and mean IoU
-        ious = []
-        for i in range(self.num_classes):
-            tp = self.confusion_matrix[i, i].item()
-            fp = self.confusion_matrix[:, i].sum().item() - tp
-            fn = self.confusion_matrix[i, :].sum().item() - tp
-
-            if tp + fp + fn > 0:
-                iou = tp / (tp + fp + fn)
-            else:
-                iou = 0.0
-
-            ious.append(iou * 100)
-            metrics[f"iou_{self.class_names[i]}"] = iou * 100
-
-        metrics["mean_iou"] = sum(ious) / len(ious) if ious else 0.0
-
-        # Per-class accuracy
-        for i in range(self.num_classes):
-            class_total = self.confusion_matrix[i, :].sum().item()
-            class_correct = self.confusion_matrix[i, i].item()
-            class_acc = (class_correct / class_total) * 100 if class_total > 0 else 0.0
-            metrics[f"acc_{self.class_names[i]}"] = class_acc
-
-        return metrics
-
-    def get_summary_string(self) -> str:
-        """Get a formatted string summary of metrics"""
-        metrics = self.compute()
-
-        summary = []
-        summary.append(f"Pixel Accuracy: {metrics['pixel_accuracy']:.2f}%")
-        summary.append(f"Mean IoU: {metrics['mean_iou']:.2f}%")
-
-        for i, class_name in enumerate(self.class_names):
-            iou = metrics[f"iou_{class_name}"]
-            acc = metrics[f"acc_{class_name}"]
-            summary.append(f"{class_name}: IoU={iou:.2f}%, Acc={acc:.2f}%")
-
-        return " | ".join(summary)
-
-
-class SimpleSegmentationMetrics:
-    def __init__(self, num_classes: int):
-        self.num_classes = num_classes
-        self.reset()
-
-    def reset(self):
-        self.confusion_matrix = torch.zeros(self.num_classes, self.num_classes)
-
-    def update(self, preds: torch.Tensor, targets: torch.Tensor):
-        preds = torch.argmax(preds, dim=1) if preds.dim() == 4 else preds
-        targets = torch.argmax(targets, dim=1) if targets.dim() == 4 else targets
-        preds = preds.flatten()
-        targets = targets.flatten()
-        mask = (targets >= 0) & (targets < self.num_classes)
-        preds = preds[mask]
-        targets = targets[mask]
-        indices = targets * self.num_classes + preds
-        cm = torch.bincount(indices, minlength=self.num_classes**2)
-        self.confusion_matrix += cm.view(self.num_classes, self.num_classes)
-
-    def compute(self):
-        cm = self.confusion_matrix
-        acc = cm.trace() / cm.sum() if cm.sum() > 0 else 0.0
-        iou = []
-        for i in range(self.num_classes):
-            tp = cm[i, i]
-            fp = cm[:, i].sum() - tp
-            fn = cm[i, :].sum() - tp
-            denom = tp + fp + fn
-            iou.append(tp / denom if denom > 0 else 0.0)
-        mean_iou = sum(iou) / self.num_classes
-        return {"pixel_accuracy": acc.item(), "mean_iou": mean_iou.item()}
-
-
 class MetricsCallback(Callback):
     """
     Callback to compute and log segmentation metrics during training
@@ -317,8 +165,8 @@ class MetricsCallback(Callback):
     def __init__(self, num_classes: int, class_names: List[str] = None):
         self.num_classes = num_classes
         self.class_names = class_names or ["Background", "Unknown", "Foreground"]
-        self.train_metrics = SimpleSegmentationMetrics(num_classes, class_names)
-        self.val_metrics = SimpleSegmentationMetrics(num_classes, class_names)
+        self.train_metrics = SegmentationMetrics(num_classes, class_names)
+        self.val_metrics = SegmentationMetrics(num_classes, class_names)
 
     def on_epoch_begin(self, trainer, epoch):
         """Reset metrics at the beginning of each epoch"""
