@@ -15,12 +15,11 @@ data:
 # Model specification
 model:
   params:
-    in_channels: 1
-    latent_dim: 128
+    device: cuda:0
 
 # loss function
 loss:
-  type: "custom VAE loss"
+  type: "mse_loss"
   params: {}
 
 # Optimizer settings

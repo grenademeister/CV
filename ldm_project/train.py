@@ -12,8 +12,7 @@ from torch import nn, optim
 
 # import dataset and model
 from dataset import DataSet
-from vae import VAE as Model
-from helper import vae_loss
+from ddpm import Diffusion as Model
 from callback import EarlyStopping, CheckpointResume, ModelCheckpoint
 
 
@@ -131,18 +130,18 @@ class Trainer:
         running_loss = 0.0
         for i, (x, y) in enumerate(self.train_loader, 1):
             x, y = x.to(self.device), y.to(self.device)
-            # Forward pass
-            preds = self.model(x)
             self.optimizer.zero_grad()
+            # Forward pass
+            preds, target = self.model(x)
             # Compute loss using configured criterion
             if hasattr(self.criterion, "__call__") and not isinstance(
                 self.criterion, type
             ):
                 # For nn.Module losses (e.g., nn.CrossEntropyLoss)
-                loss = self.criterion(preds, y)
+                loss = self.criterion(preds, target)
             else:
                 # For functional losses (e.g., F.binary_cross_entropy)
-                loss = self.criterion(preds, y, **getattr(self, "loss_params", {}))
+                loss = self.criterion(preds, target, **getattr(self, "loss_params", {}))
 
             loss.backward()
             self.optimizer.step()
@@ -151,7 +150,7 @@ class Trainer:
             # Update training metrics if callback exists
             for cb in self.callbacks:
                 if hasattr(cb, "on_train_batch_end"):
-                    cb.on_train_batch_end(self, x_reconstructed, x)
+                    cb.on_train_batch_end(self, preds, target)
 
             if i % self.config["logging"]["log_interval"] == 0:
                 self.logger.info(
@@ -166,24 +165,26 @@ class Trainer:
             for x, y in self.val_loader:
                 x, y = x.to(self.device), y.to(self.device)
 
-                preds = self.model(x)
+                preds, target = self.model(x)
 
                 # Compute loss
                 if hasattr(self.criterion, "__call__") and not isinstance(
                     self.criterion, type
                 ):
                     # For nn.Module losses
-                    loss = self.criterion(preds, y)
+                    loss = self.criterion(preds, target)
                 else:
                     # For functional losses
-                    loss = self.criterion(preds, y, **getattr(self, "loss_params", {}))
+                    loss = self.criterion(
+                        preds, target, **getattr(self, "loss_params", {})
+                    )
 
                 total_loss += loss.item()
 
                 # Update validation metrics if callback exists
                 for cb in self.callbacks:
                     if hasattr(cb, "on_val_batch_end"):
-                        cb.on_val_batch_end(self, preds, y)
+                        cb.on_val_batch_end(self, preds, target)
 
         avg = total_loss / len(self.val_loader)
         self.logger.info(f"Epoch {epoch} Validation Loss: {avg:.4f}")
