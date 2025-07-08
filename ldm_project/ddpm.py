@@ -117,3 +117,5 @@ class Diffusion(nn.Module):
             )
             x_next = mu + sigma * noise
             x_t = x_next
+
+        return x_t.type(torch.float32)

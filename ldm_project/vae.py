@@ -70,12 +70,12 @@ class Decoder(nn.Module):
             [
                 UpBlock(256, 256),
                 UpBlock(256, 256),
-                UpBlock(256, 128, use_skip=False),
+                UpBlock(256, 256),
             ]
         )  # final shape: (B, 128, H*8, W*8)
         # TODO: should fix use skip issue
-        self.norm_out = nn.GroupNorm(32, 128)
-        self.conv_out = nn.Conv2d(128, out_channels, kernel_size=3, padding=1)
+        self.norm_out = nn.GroupNorm(32, 256)
+        self.conv_out = nn.Conv2d(256, out_channels, kernel_size=3, padding=1)
 
     def forward(self, z: Tensor, res_outs: list[Tensor]) -> Tensor:
         assert isinstance(z, torch.Tensor), "Input z must be a torch.Tensor"
@@ -103,7 +103,7 @@ class VAE(nn.Module):
     def encode(self, x: Tensor) -> Tuple[Tensor, Tensor, list[Tensor]]:
         return self.encoder(x)
 
-    def decode(self, z: Tensor, res_outs: list[Tensor]) -> Tensor:
+    def decode(self, z: Tensor, res_outs: Optional[list[Tensor]]) -> Tensor:
         return self.decoder(z, res_outs)
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
@@ -120,3 +120,7 @@ if __name__ == "__main__":
     reconstructed_x, latent = vae(x)
     print(reconstructed_x.shape)  # Should be (1, 3, 64, 64)
     print(latent.shape)  # Should be (1, 256, 8, 8) for the latent representation
+
+    x_latent = torch.randn(1, 128, 8, 8)  # Example latent tensor
+    reconstructed_x_from_latent = vae.decode(x_latent, None)
+    print(reconstructed_x_from_latent.shape)  # Should be (1, 3, 64, 64)

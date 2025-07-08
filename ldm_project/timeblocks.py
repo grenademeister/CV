@@ -15,10 +15,11 @@ class TimeResBlock(nn.Module):
         super().__init__()
         assert time_injection in ["FiLM", "Add"], "Invalid time injection method"
         self.time_injection = time_injection
+        self.num_groups = min(32, out_channels // 4)
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
-        self.norm1 = nn.GroupNorm(32, out_channels)
+        self.norm1 = nn.GroupNorm(self.num_groups, out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
-        self.norm2 = nn.GroupNorm(32, out_channels)
+        self.norm2 = nn.GroupNorm(self.num_groups, out_channels)
         self.time_mlp = nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, out_channels))
         self.skip_connection = (
             nn.Conv2d(in_channels, out_channels, kernel_size=1)
@@ -47,17 +48,52 @@ class TimeResBlock(nn.Module):
         return x + skip
 
 
-class TimeMidBlock(nn.Module):
-    def __init__(self, channels: int, time_emb_dim: int, num_layers: int = 2):
+class AttentionBlock(nn.Module):
+    def __init__(self, channels: int, num_heads: int = 8):
         super().__init__()
+        self.channels = channels
+        self.num_heads = num_heads
+        self.num_groups = min(32, channels // 4)
+        self.norm = nn.GroupNorm(self.num_groups, channels)
+        self.attention = nn.MultiheadAttention(channels, num_heads, batch_first=True)
+
+    def forward(self, x: Tensor) -> Tensor:
+        B, C, H, W = x.shape
+        skip = x
+
+        x = self.norm(x)
+        x = x.view(B, C, H * W).transpose(1, 2)  # (B, H*W, C)
+
+        x, _ = self.attention(x, x, x)
+
+        x = x.transpose(1, 2).view(B, C, H, W)
+        return x + skip
+
+
+class TimeMidBlock(nn.Module):
+    def __init__(
+        self,
+        channels: int,
+        time_emb_dim: int,
+        num_layers: int = 2,
+        attention: bool = False,
+    ):
+        super().__init__()
+        self.num_layers = num_layers
         self.res_blocks = nn.ModuleList(
             [TimeResBlock(channels, channels, time_emb_dim) for _ in range(num_layers)]
         )
-        # TODO: implement attention block here for better performance
+        self.attention = attention
+        if attention:
+            self.attention_blocks = nn.ModuleList(
+                [AttentionBlock(channels) for _ in range(num_layers)]
+            )
 
     def forward(self, x: Tensor, time_emb: Tensor) -> Tensor:
-        for block in self.res_blocks:
-            x = block(x, time_emb)
+        for i in range(self.num_layers):
+            x = self.res_blocks[i](x, time_emb)
+            if self.attention:
+                x = self.attention_blocks[i](x)
         return x
 
 
@@ -68,8 +104,10 @@ class TimeDownBlock(nn.Module):
         out_channels: int,
         time_emb_dim: int,
         num_layers: int = 2,
+        attention: bool = False,
     ):
         super().__init__()
+        self.num_layers = num_layers
         self.res_blocks = nn.ModuleList(
             [TimeResBlock(in_channels, out_channels, time_emb_dim)]
             + [
@@ -80,10 +118,17 @@ class TimeDownBlock(nn.Module):
         self.downsample = nn.Conv2d(
             out_channels, out_channels, kernel_size=3, stride=2, padding=1
         )
+        self.attention = attention
+        if attention:
+            self.attention_blocks = nn.ModuleList(
+                [AttentionBlock(out_channels) for _ in range(num_layers)]
+            )
 
     def forward(self, x: Tensor, time_emb: Tensor) -> tuple[Tensor, Tensor]:
-        for block in self.res_blocks:
-            x = block(x, time_emb)
+        for i in range(self.num_layers):
+            x = self.res_blocks[i](x, time_emb)
+            if self.attention:
+                x = self.attention_blocks[i](x)
         res_out = x
         x = self.downsample(x)
         return x, res_out
@@ -96,8 +141,10 @@ class TimeUpBlock(nn.Module):
         out_channels: int,
         time_emb_dim: int,
         num_layers: int = 2,
+        attention: bool = False,
     ):
         super().__init__()
+        self.num_layers = num_layers
         self.res_blocks = nn.ModuleList(
             [TimeResBlock(in_channels + out_channels, out_channels, time_emb_dim)]
             + [
@@ -113,6 +160,11 @@ class TimeUpBlock(nn.Module):
             padding=1,
             output_padding=1,
         )
+        self.attention = attention
+        if attention:
+            self.attention_blocks = nn.ModuleList(
+                [AttentionBlock(out_channels) for _ in range(num_layers)]
+            )
 
     def forward(
         self, x: Tensor, time_emb: Tensor, skip: Optional[Tensor] = None
@@ -120,6 +172,8 @@ class TimeUpBlock(nn.Module):
         x = self.upsample(x)
         if skip is not None:
             x = torch.cat([x, skip], dim=1)
-        for block in self.res_blocks:
-            x = block(x, time_emb)
+        for i in range(self.num_layers):
+            x = self.res_blocks[i](x, time_emb)
+            if self.attention:
+                x = self.attention_blocks[i](x)
         return x

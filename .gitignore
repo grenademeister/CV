@@ -12,9 +12,14 @@
 /vae_project/mnist/
 /vae_project/var/
 
+/ldm_project/__pycache__/
+/ldm_project/data/
+/ldm_project/mnist/
+
 *.log
 *.pth
 *.tar.gz
 *.zip
+*.pyc
 
 nohup.out
