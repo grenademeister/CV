@@ -6,8 +6,6 @@ import itertools
 import copy
 from datetime import datetime
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
 import torch
 from torch.utils.data import DataLoader
 from torch import nn, optim
@@ -94,6 +92,18 @@ class Trainer:
 
     def _build_model(self):
         self.model = Model(**self.config["model"]["params"]).to(self.device)
+        # if parallel training is enabled
+        if self.config["training"].get("parallel", False):
+            if torch.cuda.device_count() > 1:
+                self.model = nn.DataParallel(self.model)
+                self.logger.info(
+                    f"Using {torch.cuda.device_count()} GPUs for training."
+                )
+            else:
+                self.logger.warning(
+                    "Parallel training enabled but only one GPU detected. "
+                    "Falling back to single GPU mode."
+                )
         self.logger.info(f"Model initialized on {self.device}.")
 
     def _setup_loss(self):

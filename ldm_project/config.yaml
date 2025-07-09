@@ -43,6 +43,7 @@ training:
   num_workers:                1
   resume:                     false
   early_stopping_patience:    10
+  parallel:                  true # use multiple GPUs if available
 
 # Logging & checkpointing
 logging:

@@ -91,6 +91,18 @@ class Trainer:
 
     def _build_model(self):
         self.model = Model(**self.config["model"]["params"]).to(self.device)
+        # if parallel training is enabled
+        if self.config["training"].get("parallel", False):
+            if torch.cuda.device_count() > 1:
+                self.model = nn.DataParallel(self.model)
+                self.logger.info(
+                    f"Using {torch.cuda.device_count()} GPUs for training."
+                )
+            else:
+                self.logger.warning(
+                    "Parallel training enabled but only one GPU detected. "
+                    "Falling back to single GPU mode."
+                )
         self.logger.info(f"Model initialized on {self.device}.")
 
     def _setup_loss(self):

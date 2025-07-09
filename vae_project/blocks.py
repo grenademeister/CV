@@ -38,7 +38,7 @@ class MidBlock(nn.Module):
         self.num_layers = num_layers
         self.res_blocks = nn.ModuleList(
             [ResBlock(in_channels, out_channels)]
-            + [ResBlock(out_channels, out_channels) for _ in range(num_layers)]
+            + [ResBlock(out_channels, out_channels) for _ in range(num_layers - 1)]
         )
 
     def forward(self, x: Tensor) -> Tensor:

@@ -97,6 +97,19 @@ class Trainer:
         self.vae.load_state_dict(
             torch.load(self.config["vae"]["checkpoint_dir"], map_location=self.device)
         )
+        # if parallel training is enabled
+        if self.config["training"].get("parallel", False):
+            if torch.cuda.device_count() > 1:
+                self.model = nn.DataParallel(self.model)
+                self.vae = nn.DataParallel(self.vae)
+                self.logger.info(
+                    f"Using {torch.cuda.device_count()} GPUs for training."
+                )
+            else:
+                self.logger.warning(
+                    "Parallel training enabled but only one GPU detected. "
+                    "Falling back to single GPU mode."
+                )
         self.logger.info(f"VAE loaded from {self.config['vae']['checkpoint_dir']}.")
 
     def _setup_loss(self):

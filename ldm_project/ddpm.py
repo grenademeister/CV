@@ -18,10 +18,8 @@ def beta_scheduling(timesteps: int) -> Tensor:
 
 
 class Diffusion(nn.Module):
-    def __init__(self, device: torch.device):
+    def __init__(self):
         super().__init__()
-
-        self.device = device
 
         self.network = Unet(
             in_chans=1,
@@ -31,7 +29,7 @@ class Diffusion(nn.Module):
             time_emb_dim=256,
         )
         self.timesteps: int = 1000
-        self.betas = beta_scheduling(timesteps=self.timesteps).to(device)
+        self.betas = beta_scheduling(timesteps=self.timesteps)
         self.alphas = 1.0 - self.betas
         self.a_cumprod = torch.cumprod(self.alphas, dim=0)
         self.sqrt_a_cumprod = torch.sqrt(self.a_cumprod)
@@ -50,6 +48,7 @@ class Diffusion(nn.Module):
         Raises:
             AssertionError: If the input tensor is not 4D.
         """
+        device = lab.device
         if not (lab.dim() == 4):
             raise AssertionError("Tensors must be 4D")
         batch_size = lab.shape[0]
@@ -58,13 +57,13 @@ class Diffusion(nn.Module):
             low=0,
             high=self.timesteps,
             size=(batch_size,),
-            device=self.device,
+            device=device,
             dtype=torch.long,
         )  # sample timesteps
-        noise = torch.randn_like(lab).to(self.device)  # sample noise
+        noise = torch.randn_like(lab).to(device)  # sample noise
 
-        sqrt_a_cumprod = self.sqrt_a_cumprod.to(self.device)
-        sqrt_one_minus_a_cumprod = self.sqrt_one_minus_a_cumprod.to(self.device)
+        sqrt_a_cumprod = self.sqrt_a_cumprod.to(device)
+        sqrt_one_minus_a_cumprod = self.sqrt_one_minus_a_cumprod.to(device)
 
         x_t = (
             sqrt_a_cumprod.gather(0, t).view(batch_size, 1, 1, 1) * lab
@@ -77,6 +76,8 @@ class Diffusion(nn.Module):
 
     @torch.inference_mode()
     def recon(self, out_size: torch.Size, interval: float = 50):
+        device = next(self.parameters()).device
+
         batch_size = out_size[0]
 
         times = torch.linspace(
@@ -85,21 +86,21 @@ class Diffusion(nn.Module):
         times = list(reversed(times.int().tolist()))
         time_pairs = list(itertools.pairwise(times))
 
-        noise = torch.randn(out_size).to(self.device)
+        noise = torch.randn(out_size).to(device)
         x_t = noise.type(torch.float32)
 
         for time, time_next in time_pairs:
             t_batch = torch.full(
-                (batch_size,), time, device=self.device, dtype=torch.long
+                (batch_size,), time, device=device, dtype=torch.long
             )
             t_next_batch = torch.full(
-                (batch_size,), time_next, device=self.device, dtype=torch.long
+                (batch_size,), time_next, device=device, dtype=torch.long
             )
 
             # network inference
             predicted_noise = self.network(x_t, t_batch.type(torch.float32))
 
-            a_cumprod = self.a_cumprod.to(self.device)
+            a_cumprod = self.a_cumprod.to(device)
             a_cumprod_t = a_cumprod.gather(0, t_batch).view(batch_size, 1, 1, 1)
             a_cumprod_t_next = a_cumprod.gather(0, t_next_batch).view(
                 batch_size, 1, 1, 1
