@@ -32,7 +32,6 @@ class DataSet(Dataset):
             [
                 T.Resize(self.image_size),
                 T.ToTensor(),
-                T.Normalize(mean=[0.5], std=[0.5]),  # Normalize to [-1, 1]
             ]
         )
 

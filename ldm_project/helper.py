@@ -10,7 +10,7 @@ def vae_loss(x, x_recon, mu, logvar, beta=1.0):
     # KL divergence
     kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / x.shape[0]
 
-    return recon_loss + beta * kl_loss
+    return recon_loss, beta * kl_loss
 
 
 class TimeEmbedding(nn.Module):

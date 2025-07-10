@@ -8,18 +8,20 @@ device: cuda:0
 
 # Paths to datasets
 data:
-  train_path: ./mnist
-  val_path:   ./mnist
+  train_path: ../../data/data_v2_slice_512/train/
+  val_path:   ../../data/data_v2_slice_512/train/
 
 
 # Model specification
 model:
   params:
-    device: cuda:0
+    in_channels: 1
+    latent_dim: 8
+
 
 # loss function
 loss:
-  type: "mse_loss"
+  type: "vae_loss"
   params: {}
 
 # Optimizer settings
@@ -39,7 +41,7 @@ scheduler:
 # Training parameters
 training:
   epochs:                     50
-  batch_size:                 32
+  batch_size:                 4
   num_workers:                1
   resume:                     false
   early_stopping_patience:    10

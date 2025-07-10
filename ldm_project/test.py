@@ -1,173 +1,154 @@
 import torch
-import torch.nn.functional as F
-from torch import nn
-
-import yaml
 import matplotlib.pyplot as plt
-
+import numpy as np
 from ddpm import Diffusion
-from vae import VAE
-from dataset import DataSet
+import os
 
 
-class DiffusionTester:
-    def __init__(self, device, criterion, callbacks=None):
-        self.callbacks = callbacks if callbacks is not None else []
-        self.model = Diffusion(
-            device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        )
-        self.device = device
-        self.criterion = criterion
-
+class DDPMSampler:
+    def __init__(self, device="auto"):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if device == "auto" else device
+        self.model = Diffusion(device=self.device)
+        
     def load_model(self, model_path):
-        """Load a pre-trained model from the specified path."""
-        checkpoint = torch.load(model_path, map_location=self.device)
-        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        """Load a pre-trained DDPM model."""
+        checkpoint = torch.load(model_path, map_location=self.device, weights_only=True)
+        
+        # Handle different checkpoint formats
+        state_dict = checkpoint
+        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+            state_dict = checkpoint['state_dict']
+        
+        # Remove 'module.' prefix if present (for DataParallel models)
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            key = k[7:] if k.startswith('module.') else k
+            new_state_dict[key] = v
+        
+        self.model.load_state_dict(new_state_dict)
         self.model.to(self.device)
-        print(f"Model loaded from {model_path}.")
-
-    def test_recon(self):
-        self.load_model("best_0.pth")
-        out_size = torch.Size([1, 1, 32, 32])
-        output = self.model.recon(out_size=out_size, interval=0.5)
-        print("Reconstruction completed.")
-        # visualize results below
-        plt.imshow(output[0, 0].cpu().numpy(), cmap="gray")
-        plt.axis("off")
-        plt.show()
-
-    def test(self, test_loader):
         self.model.eval()
-        total_loss = 0.0
+        print(f"✓ Model loaded from {model_path}")
+        
+    def sample(self, num_samples=16, image_size=32, channels=1, interval=50):
+        """Generate samples using the DDPM model."""
+        print(f"🎯 Generating {num_samples} samples with interval={interval}...")
+        
         with torch.no_grad():
-            for x, y in test_loader:
-                x, y = x.to(self.device), y.to(self.device)
-
-                preds, target = self.model(x)
-
-                # Compute loss
-                if hasattr(self.criterion, "__call__") and not isinstance(
-                    self.criterion, type
-                ):
-                    # For nn.Module losses
-                    loss = self.criterion(preds, target)
-                else:
-                    # For functional losses
-                    loss = self.criterion(preds, target)
-
-                total_loss += loss.item()
-
-                # Update metrics if callback exists
-                for cb in self.callbacks:
-                    if hasattr(cb, "on_test_batch_end"):
-                        cb.on_test_batch_end(self, preds, target)
-
-        avg_loss = total_loss / len(test_loader)
-        print(f"Test Loss: {avg_loss:.4f}")
-        return avg_loss
-
-
-class LDMTester:
-    def __init__(self, device, criterion, callbacks=None, config=None):
-        self.config = config if config is not None else yaml.safe_load("config.yaml")
-        self.callbacks = callbacks if callbacks is not None else []
-        self.vae = VAE(**self.config["vae"]["params"]).to(self.device)
-        self.vae.load_state_dict(
-            torch.load(self.config["vae"]["checkpoint_dir"], map_location=self.device)
-        )
-        self.diffusion = Diffusion(
-            device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        )
-        self.device = device
-        self.criterion = criterion
-
-    def load_models(self, vae_path, diffusion_path):
-        """Load pre-trained VAE and diffusion models from specified paths."""
-        # Load VAE
-        vae_checkpoint = torch.load(vae_path, map_location=self.device)
-        self.vae.load_state_dict(vae_checkpoint)
-        self.vae.to(self.device)
-        print(f"VAE model loaded from {vae_path}.")
-
-        # Load Diffusion
-        diffusion_checkpoint = torch.load(diffusion_path, map_location=self.device)
-        self.diffusion.load_state_dict(diffusion_checkpoint)
-        self.diffusion.to(self.device)
-        print(f"Diffusion model loaded from {diffusion_path}.")
-
-    def test_recon(self):
-        self.load_models("vae_best.pth", "diffusion_best.pth")
-        self.vae.eval()
-        self.diffusion.eval()
-
-        with torch.no_grad():
-            # Generate in latent space
-            latent_size = torch.Size([1, 4, 4, 4])  # Assuming latent dimensions
-            latent_output = self.diffusion.recon(out_size=latent_size, interval=1)
-
-            # Decode from latent space to image space
-            output = self.vae.decode(latent_output, res_outs=None)
-
-        print("LDM Reconstruction completed.")
-        # visualize results below
-        plt.imshow(output[0, 0].cpu().numpy(), cmap="gray")
-        plt.axis("off")
+            out_size = torch.Size([num_samples, channels, image_size, image_size])
+            samples = self.model.recon(out_size=out_size, interval=interval)
+            
+        # Clamp values to valid range
+        samples = torch.clamp(samples, 0, 1)
+        return samples.cpu().numpy()
+    
+    def visualize_samples(self, samples, save_path="generated_samples.png", title="Generated Samples"):
+        """Create a nice grid visualization of generated samples."""
+        num_samples = len(samples)
+        
+        # Determine grid size
+        grid_size = int(np.ceil(np.sqrt(num_samples)))
+        
+        # Create figure with better aesthetics
+        fig, axes = plt.subplots(grid_size, grid_size, figsize=(12, 12))
+        fig.suptitle(title, fontsize=16, fontweight='bold')
+        
+        # Handle single row/column case
+        if grid_size == 1:
+            axes = [axes]
+        elif num_samples <= grid_size:
+            axes = axes.reshape(-1)
+        else:
+            axes = axes.flatten()
+        
+        for i in range(grid_size * grid_size):
+            ax = axes[i]
+            
+            if i < num_samples:
+                # Display sample
+                img = samples[i, 0] if samples.shape[1] == 1 else samples[i]
+                ax.imshow(img, cmap='gray', vmin=0, vmax=1)
+                ax.set_title(f'Sample {i+1}', fontsize=10)
+            else:
+                # Empty subplot
+                ax.set_visible(False)
+                
+            ax.axis('off')
+        
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.show()
+        print(f"✓ Visualization saved to {save_path}")
+        
+    def compare_intervals(self, intervals=[1, 10, 25, 50], num_samples=4):
+        """Compare sampling quality across different intervals."""
+        print("🔍 Comparing different sampling intervals...")
+        
+        fig, axes = plt.subplots(len(intervals), num_samples, figsize=(15, 4*len(intervals)))
+        fig.suptitle('Sampling Quality vs Interval', fontsize=16, fontweight='bold')
+        
+        for i, interval in enumerate(intervals):
+            print(f"  Sampling with interval={interval}...")
+            samples = self.sample(num_samples=num_samples, interval=interval)
+            
+            for j in range(num_samples):
+                ax = axes[i, j] if len(intervals) > 1 else axes[j]
+                ax.imshow(samples[j, 0], cmap='gray', vmin=0, vmax=1)
+                ax.set_title(f'Interval={interval}, Sample {j+1}', fontsize=10)
+                ax.axis('off')
+        
+        plt.tight_layout()
+        plt.savefig('interval_comparison.png', dpi=150, bbox_inches='tight')
+        plt.show()
+        print("✓ Interval comparison saved to interval_comparison.png")
 
-    def test(self, test_loader):
-        self.vae.eval()
-        self.diffusion.eval()
-        total_loss = 0.0
 
-        with torch.no_grad():
-            for x, y in test_loader:
-                x, y = x.to(self.device), y.to(self.device)
-
-                # Encode to latent space
-                latent_x = self.vae.encode(x)
-
-                # Apply diffusion in latent space
-                preds, target = self.diffusion(latent_x)
-
-                # Decode predictions back to image space for loss computation
-                decoded_preds = self.vae.decode(preds, res_outs=None)
-                decoded_target = self.vae.decode(target, res_outs=None)
-
-                # Compute loss
-                if hasattr(self.criterion, "__call__") and not isinstance(
-                    self.criterion, type
-                ):
-                    # For nn.Module losses
-                    loss = self.criterion(decoded_preds, decoded_target)
-                else:
-                    # For functional losses
-                    loss = self.criterion(decoded_preds, decoded_target)
-
-                total_loss += loss.item()
-
-                # Update metrics if callback exists
-                for cb in self.callbacks:
-                    if hasattr(cb, "on_test_batch_end"):
-                        cb.on_test_batch_end(self, decoded_preds, decoded_target)
-
-        avg_loss = total_loss / len(test_loader)
-        print(f"LDM Test Loss: {avg_loss:.4f}")
-        return avg_loss
+def main():
+    # Initialize sampler
+    sampler = DDPMSampler()
+    
+    # Load the best model
+    model_path = "./var/checkpoints/best_17.pth"
+    if not os.path.exists(model_path):
+        print(f"❌ Model not found at {model_path}")
+        print("Available checkpoints:")
+        checkpoint_dir = "./var/checkpoints/"
+        if os.path.exists(checkpoint_dir):
+            for file in os.listdir(checkpoint_dir):
+                if file.endswith('.pth'):
+                    print(f"  - {file}")
+        return
+    
+    sampler.load_model(model_path)
+    
+    # Generate and visualize samples
+    print("\n" + "="*50)
+    print("🎨 DDPM Image Generation")
+    print("="*50)
+    
+    # 1. Generate a large grid of samples
+    samples = sampler.sample(num_samples=16, interval=50)
+    sampler.visualize_samples(samples, 
+                            save_path="ddpm_samples_grid.png",
+                            title="DDPM Generated Samples (16x)")
+    
+    # 2. Compare different intervals
+    print("\n" + "-"*50)
+    sampler.compare_intervals(intervals=[1, 10, 25, 50], num_samples=4)
+    
+    # 3. Generate high-quality samples with interval=1
+    print("\n" + "-"*50)
+    print("🎯 Generating high-quality samples (interval=1)...")
+    hq_samples = sampler.sample(num_samples=9, interval=1)
+    sampler.visualize_samples(hq_samples, 
+                            save_path="ddpm_hq_samples.png",
+                            title="High-Quality DDPM Samples (interval=1)")
+    
+    print("\n✅ All done! Check the generated images:")
+    print("  - ddpm_samples_grid.png (16 samples)")
+    print("  - interval_comparison.png (interval comparison)")
+    print("  - ddpm_hq_samples.png (high-quality samples)")
 
 
 if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    criterion = nn.MSELoss()  # Example loss function
-
-    # Test DiffusionTester
-    diffusion_tester = DiffusionTester(device, criterion)
-
-    # Test LDMTester
-    ldm_tester = LDMTester(device, criterion)
-
-    # Assuming you have a DataLoader `test_loader` defined
-    test_loader = DataSet(root="mnist", split="test")
-
-    # For testing reconstruction
-    diffusion_tester.test_recon()
-    ldm_tester.test_recon()
+    main()
