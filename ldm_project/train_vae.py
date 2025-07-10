@@ -11,10 +11,11 @@ from torch.utils.data import DataLoader
 from torch import nn, optim
 
 # import dataset and model
-from ldm_project.dataloader.dataset_mri import DataSet
-from ldm_project.model.vae import VAE as Model
-from ldm_project.model.helper import vae_loss
-from ldm_project.trainers.callback import (
+from dataloader.dataset_mri import DataSet
+from model.vae import VAE as Model
+from model.helper import vae_loss
+from model.helper import BetaScheduler
+from trainers.callback import (
     EarlyStopping,
     CheckpointResume,
     ModelCheckpoint,
@@ -30,6 +31,7 @@ class Trainer:
         )
         self.logger = self._setup_logging()
         self.start_epoch = 1
+        self.global_step = 0
         self.stop_training = False
         self._log_hyperparameters()
         self._load_data()
@@ -143,10 +145,15 @@ class Trainer:
         else:
             self.scheduler = None
 
+        # beta scheduler for VAE
+        self.beta_scheduler = BetaScheduler()
+        self.logger.info("Beta scheduler for VAE initialized.")
+
     def train_epoch(self, epoch: int) -> float:
         self.model.train()
         running_loss = 0.0
         for i, (x, y) in enumerate(self.train_loader, 1):
+            self.global_step += 1
             x, y = x.to(self.device), y.to(self.device)
 
             self.optimizer.zero_grad()
@@ -154,15 +161,8 @@ class Trainer:
             mu, logvar = torch.chunk(latent, 2, dim=1)
             # Compute loss using configured criterion
             # use VAE's criterion
-            loss_recon, loss_kl = vae_loss(x, x_reconstructed, mu, logvar, beta=1.0)
-            # if hasattr(self.criterion, "__call__") and not isinstance(
-            #     self.criterion, type
-            # ):
-            #     # For nn.Module losses (e.g., nn.CrossEntropyLoss)
-            #     loss = self.criterion(preds, y)
-            # else:
-            #     # For functional losses (e.g., F.binary_cross_entropy)
-            #     loss = self.criterion(preds, y, **getattr(self, "loss_params", {}))
+            beta = self.beta_scheduler.get_beta(self.global_step)
+            loss_recon, loss_kl = vae_loss(x, x_reconstructed, mu, logvar, beta=beta)
             loss = loss_recon + loss_kl
             loss.backward()
             self.optimizer.step()

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from ldm_project.model.helper import TimeEmbedding
+from helper import TimeEmbedding
 from timeblocks import TimeDownBlock, TimeUpBlock, TimeMidBlock
 
 

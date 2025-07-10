@@ -30,10 +30,21 @@ def vae_loss(x, x_recon, mu, logvar, beta=1.0):
     # per-pixel average MSE
     recon = nn.functional.mse_loss(x_recon, x, reduction="mean")
 
-    # mean KL divergence over latent spatial map
     kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum(dim=[1, 2, 3]).mean()
 
     return recon, beta * kl
+
+
+class BetaScheduler:
+    def __init__(self, start_beta=0.0, end_beta=1.0, anneal_steps=10000):
+        self.start_beta = start_beta
+        self.end_beta = end_beta
+        self.anneal_steps = anneal_steps
+
+    def get_beta(self, step):
+        progress = min(1.0, step / self.anneal_steps)
+        return 0.001
+        # return self.start_beta + progress * (self.end_beta - self.start_beta)
 
 
 class TimeEmbedding(nn.Module):

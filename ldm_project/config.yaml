@@ -8,8 +8,8 @@ device: cuda:0
 
 # Paths to datasets
 data:
-  train_path: /fast_storage/hyeokgi/data_v2_slice_512/train/
-  val_path:   /fast_storage/hyeokgi/data_v2_slice_512/train/
+  train_path: /fast_storage/hyeokgi/data/data_v2_slice_512/train/
+  val_path:   /fast_storage/hyeokgi/data/data_v2_slice_512/train/
 
 
 # Model specification

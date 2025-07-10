@@ -4,7 +4,7 @@ from torch import Tensor
 
 from typing import Optional, Tuple
 
-from blocks import MidBlock, DownBlock, UpBlock
+from model.blocks import MidBlock, DownBlock, UpBlock
 
 
 class Encoder(nn.Module):
