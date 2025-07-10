@@ -11,9 +11,13 @@ from torch.utils.data import DataLoader
 from torch import nn, optim
 
 # import dataset and model
-from dataset import DataSet
-from ddpm import Diffusion as Model
-from callback import EarlyStopping, CheckpointResume, ModelCheckpoint
+from ldm_project.dataloader.dataset import DataSet
+from ldm_project.model.ddpm import Diffusion as Model
+from ldm_project.trainers.callback import (
+    EarlyStopping,
+    CheckpointResume,
+    ModelCheckpoint,
+)
 
 
 # === Core Trainer ===

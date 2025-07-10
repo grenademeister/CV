@@ -137,7 +137,10 @@ class ModelCheckpoint(Callback):
         # Save model
         torch.save(
             trainer.model.state_dict(),
-            os.path.join(self.checkpoint_dir, f"{prefix}_{epoch}.pth"),
+            os.path.join(
+                self.checkpoint_dir,
+                f"{prefix}_{epoch}.pth" if prefix == "epoch" else f"{prefix}.pth",
+            ),
         )
 
         # Save optimizer

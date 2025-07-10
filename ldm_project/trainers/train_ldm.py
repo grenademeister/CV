@@ -11,10 +11,14 @@ from torch.utils.data import DataLoader
 from torch import nn, optim
 
 # import dataset and model
-from dataset_mri import DataSet
-from vae import VAE as Model
-from helper import vae_loss
-from callback import EarlyStopping, CheckpointResume, ModelCheckpoint
+from ldm_project.dataloader.dataset import DataSet
+from ldm_project.model.ddpm import Diffusion as Model
+from ldm_project.model.vae import VAE
+from ldm_project.trainers.callback import (
+    EarlyStopping,
+    CheckpointResume,
+    ModelCheckpoint,
+)
 
 
 # === Core Trainer ===
@@ -92,10 +96,16 @@ class Trainer:
 
     def _build_model(self):
         self.model = Model(**self.config["model"]["params"]).to(self.device)
+        self.logger.info(f"Model initialized on {self.device}.")
+        self.vae = VAE(**self.config["vae"]["params"]).to(self.device)
+        self.vae.load_state_dict(
+            torch.load(self.config["vae"]["checkpoint_dir"], map_location=self.device)
+        )
         # if parallel training is enabled
         if self.config["training"].get("parallel", False):
             if torch.cuda.device_count() > 1:
                 self.model = nn.DataParallel(self.model)
+                self.vae = nn.DataParallel(self.vae)
                 self.logger.info(
                     f"Using {torch.cuda.device_count()} GPUs for training."
                 )
@@ -104,7 +114,7 @@ class Trainer:
                     "Parallel training enabled but only one GPU detected. "
                     "Falling back to single GPU mode."
                 )
-        self.logger.info(f"Model initialized on {self.device}.")
+        self.logger.info(f"VAE loaded from {self.config['vae']['checkpoint_dir']}.")
 
     def _setup_loss(self):
         loss_cfg = self.config.get("loss", {"type": "BCEWithLogitsLoss", "params": {}})
@@ -119,7 +129,6 @@ class Trainer:
                 f"Loss function {loss_cfg['type']} not found in nn or nn.functional."
             )
             self.logger.warning(f"Assuming it is a custom function.")
-            self.criterion = vae_loss
         self.logger.info(f"Loss function ({loss_cfg['type']}) ready.")
 
     def _setup_optimizer(self):
@@ -144,22 +153,23 @@ class Trainer:
         running_loss = 0.0
         for i, (x, y) in enumerate(self.train_loader, 1):
             x, y = x.to(self.device), y.to(self.device)
-
             self.optimizer.zero_grad()
-            x_reconstructed, latent = self.model(x)  # [B, C, H, W]
-            mu, logvar = torch.chunk(latent, 2, dim=1)
+            # Forward pass
+            # no gradient tracking for VAE
+            with torch.no_grad():
+                z = self.vae.encode(x)
+
+            preds, target = self.model(z)
             # Compute loss using configured criterion
-            # use VAE's criterion
-            loss_recon, loss_kl = vae_loss(x, x_reconstructed, mu, logvar, beta=1.0)
-            # if hasattr(self.criterion, "__call__") and not isinstance(
-            #     self.criterion, type
-            # ):
-            #     # For nn.Module losses (e.g., nn.CrossEntropyLoss)
-            #     loss = self.criterion(preds, y)
-            # else:
-            #     # For functional losses (e.g., F.binary_cross_entropy)
-            #     loss = self.criterion(preds, y, **getattr(self, "loss_params", {}))
-            loss = loss_recon + loss_kl
+            if hasattr(self.criterion, "__call__") and not isinstance(
+                self.criterion, type
+            ):
+                # For nn.Module losses (e.g., nn.CrossEntropyLoss)
+                loss = self.criterion(preds, target)
+            else:
+                # For functional losses (e.g., F.binary_cross_entropy)
+                loss = self.criterion(preds, target, **getattr(self, "loss_params", {}))
+
             loss.backward()
             self.optimizer.step()
             running_loss += loss.item()
@@ -167,11 +177,11 @@ class Trainer:
             # Update training metrics if callback exists
             for cb in self.callbacks:
                 if hasattr(cb, "on_train_batch_end"):
-                    cb.on_train_batch_end(self, x_reconstructed, x)
+                    cb.on_train_batch_end(self, preds, target)
 
             if i % self.config["logging"]["log_interval"] == 0:
                 self.logger.info(
-                    f"Epoch {epoch} [{i}/{len(self.train_loader)}] Recon Loss: {loss_recon:.4f}, KL Loss: {loss_kl:.4f}, Total Loss: {loss:.4f}"
+                    f"Epoch {epoch} [{i}/{len(self.train_loader)}] Loss: {loss.item():.4f}"
                 )
         return running_loss / len(self.train_loader)
 
@@ -181,27 +191,27 @@ class Trainer:
         with torch.no_grad():
             for x, y in self.val_loader:
                 x, y = x.to(self.device), y.to(self.device)
+                z = self.vae.encode(x)
+                preds, target = self.model(z)
 
-                x_reconstructed, latent = self.model(x)  # [B, C, H, W]
-                mu, logvar = torch.chunk(latent, 2, dim=1)
-                loss_recon, loss_kl = vae_loss(x, x_reconstructed, mu, logvar, beta=1.0)
-                loss = loss_recon + loss_kl
                 # Compute loss
-                # if hasattr(self.criterion, "__call__") and not isinstance(
-                #     self.criterion, type
-                # ):
-                #     # For nn.Module losses
-                #     loss = self.criterion(preds, y)
-                # else:
-                #     # For functional losses
-                #     loss = self.criterion(preds, y, **getattr(self, "loss_params", {}))
+                if hasattr(self.criterion, "__call__") and not isinstance(
+                    self.criterion, type
+                ):
+                    # For nn.Module losses
+                    loss = self.criterion(preds, target)
+                else:
+                    # For functional losses
+                    loss = self.criterion(
+                        preds, target, **getattr(self, "loss_params", {})
+                    )
 
                 total_loss += loss.item()
 
                 # Update validation metrics if callback exists
                 for cb in self.callbacks:
                     if hasattr(cb, "on_val_batch_end"):
-                        cb.on_val_batch_end(self, x_reconstructed, x)
+                        cb.on_val_batch_end(self, preds, target)
 
         avg = total_loss / len(self.val_loader)
         self.logger.info(f"Epoch {epoch} Validation Loss: {avg:.4f}")
@@ -218,10 +228,7 @@ class Trainer:
         )
         self.callbacks.append(
             ModelCheckpoint(
-                os.path.join(
-                    self.config["logging"]["checkpoint_dir"],
-                    datetime.now().strftime("%Y%m%d_%H%M%S"),
-                ),
+                self.config["logging"]["checkpoint_dir"],
                 save_every_n_epochs=self.config["logging"]["checkpoint_save_interval"],
             )
         )

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from helper import TimeEmbedding
+from ldm_project.model.helper import TimeEmbedding
 from timeblocks import TimeDownBlock, TimeUpBlock, TimeMidBlock
 
 
@@ -26,7 +26,9 @@ class TimeUnet(nn.Module):
 
         self.down_blocks = nn.ModuleList(
             [
-                TimeDownBlock(down_channels[i], down_channels[i + 1], time_emb_dim, attention=True)
+                TimeDownBlock(
+                    down_channels[i], down_channels[i + 1], time_emb_dim, attention=True
+                )
                 for i in range(num_pool_layers)
             ]
         )
@@ -39,12 +41,14 @@ class TimeUnet(nn.Module):
         up_channels = list(reversed(down_channels))
         self.up_blocks = nn.ModuleList(
             [
-                TimeUpBlock(up_channels[i], up_channels[i + 1], time_emb_dim, attention=True)
+                TimeUpBlock(
+                    up_channels[i], up_channels[i + 1], time_emb_dim, attention=True
+                )
                 for i in range(num_pool_layers)
             ]
         )
 
-        self.norm_out = nn.GroupNorm(min(32, chans//4), chans)
+        self.norm_out = nn.GroupNorm(min(32, chans // 4), chans)
         self.conv_out = nn.Conv2d(chans, out_chans, kernel_size=3, padding=1)
 
     def forward(self, x: Tensor, t: Tensor) -> Tensor:
