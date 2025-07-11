@@ -1,0 +1,68 @@
+# config.yaml
+
+# Configuration version (for schema validation)
+version: 1.0
+
+# Device selection
+device: cuda:0
+
+# Paths to datasets
+data:
+  train_path: mnist
+  val_path:   mnist
+
+
+# Model specification
+model:
+  params:
+    device: cuda:0
+
+
+# loss function
+loss:
+  type: "mse_loss"
+  params: {}
+
+# Optimizer settings
+optimizer:
+  type: Adam
+  params:
+    lr:           0.0005
+    weight_decay: 0.0001
+
+# Learning‐rate scheduler (optional)
+scheduler:
+  type: StepLR
+  params:
+    step_size: 25
+    gamma: 0.5 
+
+# Training parameters
+training:
+  epochs:                     50
+  batch_size:                 128
+  num_workers:                1
+  resume:                     false
+  early_stopping_patience:    10
+  parallel:                  true # use multiple GPUs if available
+
+# Logging & checkpointing
+logging:
+  log_dir:        ./var/logs
+  checkpoint_dir: ./var/checkpoints
+  checkpoint_save_interval: 5
+  level:          INFO
+  log_interval:   50
+  structured:     true      # emit JSON‐formatted logs
+  format:         json
+
+# Metrics to compute and track
+metrics:
+  report:       [accuracy, precision, recall]
+  save_history: true
+
+# Hyperparameter sweep definitions
+# sweep:
+#   optimizer.params.lr:       0.0005
+#   training.batch_size:       32
+

@@ -24,32 +24,27 @@ class DDPMSampler:
             state_dict = checkpoint["state_dict"]
 
         # Remove 'module.' prefix if present (for DataParallel models)
-        new_state_dict = {}
-        for k, v in state_dict.items():
-            key = k[7:] if k.startswith("module.") else k
-            new_state_dict[key] = v
+        new_state_dict = {
+            k[7:] if k.startswith("module.") else k: v for k, v in state_dict.items()
+        }
 
         self.model.load_state_dict(new_state_dict)
         self.model.to(self.device)
         self.model.eval()
-        print(f"✓ Model loaded from {model_path}")
+        print(f"Model loaded from {model_path}")
 
     def sample(self, num_samples=16, image_size=32, channels=1, interval=50):
         """Generate samples using the DDPM model."""
-        print(f"🎯 Generating {num_samples} samples with interval={interval}...")
-
+        out_size = torch.Size([num_samples, channels, image_size, image_size])
         with torch.no_grad():
-            out_size = torch.Size([num_samples, channels, image_size, image_size])
             samples = self.model.recon(out_size=out_size, interval=interval)
 
         # Clamp values to valid range
         samples = torch.clamp(samples, 0, 1)
         return samples.cpu().numpy()
 
-    def visualize_samples(
-        self, samples, save_path="generated_samples.png", title="Generated Samples"
-    ):
-        """Create a nice grid visualization of generated samples."""
+    def visualize_samples(self, samples, save_path="generated_samples.png", title=None):
+        """Visualize generated samples in a grid."""
         num_samples = len(samples)
 
         # Determine grid size
@@ -57,19 +52,11 @@ class DDPMSampler:
 
         # Create figure with better aesthetics
         fig, axes = plt.subplots(grid_size, grid_size, figsize=(12, 12))
-        fig.suptitle(title, fontsize=16, fontweight="bold")
+        if title:
+            fig.suptitle(title, fontsize=16, fontweight="bold")
 
-        # Handle single row/column case
-        if grid_size == 1:
-            axes = [axes]
-        elif num_samples <= grid_size:
-            axes = axes.reshape(-1)
-        else:
-            axes = axes.flatten()
-
-        for i in range(grid_size * grid_size):
-            ax = axes[i]
-
+        axes = np.array(axes).reshape(-1)
+        for i, ax in enumerate(axes):
             if i < num_samples:
                 # Display sample
                 img = samples[i, 0] if samples.shape[1] == 1 else samples[i]
@@ -83,22 +70,18 @@ class DDPMSampler:
 
         plt.tight_layout()
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
-        plt.show()
-        print(f"✓ Visualization saved to {save_path}")
+        plt.close(fig)
+        print(f"Saved visualization to {save_path}")
 
     def compare_intervals(self, intervals=[1, 10, 25, 50], num_samples=4):
         """Compare sampling quality across different intervals."""
-        print("🔍 Comparing different sampling intervals...")
-
         fig, axes = plt.subplots(
             len(intervals), num_samples, figsize=(15, 4 * len(intervals))
         )
         fig.suptitle("Sampling Quality vs Interval", fontsize=16, fontweight="bold")
 
         for i, interval in enumerate(intervals):
-            print(f"  Sampling with interval={interval}...")
             samples = self.sample(num_samples=num_samples, interval=interval)
-
             for j in range(num_samples):
                 ax = axes[i, j] if len(intervals) > 1 else axes[j]
                 ax.imshow(samples[j, 0], cmap="gray", vmin=0, vmax=1)
@@ -107,8 +90,8 @@ class DDPMSampler:
 
         plt.tight_layout()
         plt.savefig("interval_comparison.png", dpi=150, bbox_inches="tight")
-        plt.show()
-        print("✓ Interval comparison saved to interval_comparison.png")
+        plt.close(fig)
+        print("Saved interval comparison to interval_comparison.png")
 
 
 def main():
@@ -116,12 +99,12 @@ def main():
     sampler = DDPMSampler()
 
     # Load the best model
-    model_path = "./var/checkpoints/best_17.pth"
+    model_path = "./var/checkpoints/best.pth"
     if not os.path.exists(model_path):
-        print(f"❌ Model not found at {model_path}")
-        print("Available checkpoints:")
+        print(f"Model not found at {model_path}")
         checkpoint_dir = "./var/checkpoints/"
         if os.path.exists(checkpoint_dir):
+            print("Available checkpoints:")
             for file in os.listdir(checkpoint_dir):
                 if file.endswith(".pth"):
                     print(f"  - {file}")
@@ -130,31 +113,19 @@ def main():
     sampler.load_model(model_path)
 
     # Generate and visualize samples
-    print("\n" + "=" * 50)
-    print("🎨 DDPM Image Generation")
-    print("=" * 50)
-
-    # 1. Generate a large grid of samples
+    print("DDPM Image Generation")
     samples = sampler.sample(num_samples=16, interval=50)
     sampler.visualize_samples(
         samples, save_path="ddpm_samples_grid.png", title="DDPM Generated Samples (16x)"
     )
-
-    # 2. Compare different intervals
-    print("\n" + "-" * 50)
     sampler.compare_intervals(intervals=[1, 10, 25, 50], num_samples=4)
-
-    # 3. Generate high-quality samples with interval=1
-    print("\n" + "-" * 50)
-    print("🎯 Generating high-quality samples (interval=1)...")
     hq_samples = sampler.sample(num_samples=9, interval=1)
     sampler.visualize_samples(
         hq_samples,
         save_path="ddpm_hq_samples.png",
         title="High-Quality DDPM Samples (interval=1)",
     )
-
-    print("\n✅ All done! Check the generated images:")
+    print("Done. Check the generated images:")
     print("  - ddpm_samples_grid.png (16 samples)")
     print("  - interval_comparison.png (interval comparison)")
     print("  - ddpm_hq_samples.png (high-quality samples)")
