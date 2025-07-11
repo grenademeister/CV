@@ -16,7 +16,7 @@ data:
 model:
   params:
     in_channels: 1
-    latent_dim: 8
+    latent_dim: 32
 
 
 # loss function
@@ -41,7 +41,7 @@ scheduler:
 # Training parameters
 training:
   epochs:                     50
-  batch_size:                 4
+  batch_size:                 8
   num_workers:                1
   resume:                     false
   early_stopping_patience:    10

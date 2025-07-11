@@ -28,7 +28,7 @@ def vae_loss_dep2(x, x_recon, mu, logvar, beta=1.0):
 
 def vae_loss(x, x_recon, mu, logvar, beta=1.0):
     # per-pixel average MSE
-    recon = nn.functional.mse_loss(x_recon, x, reduction="mean")
+    recon = nn.functional.mse_loss(x_recon, x, reduction="sum") / x.shape[0]
 
     kl = -0.5 * (1 + logvar - mu.pow(2) - logvar.exp()).sum(dim=[1, 2, 3]).mean()
 
@@ -43,7 +43,7 @@ class BetaScheduler:
 
     def get_beta(self, step):
         progress = min(1.0, step / self.anneal_steps)
-        return 0.001
+        return 1
         # return self.start_beta + progress * (self.end_beta - self.start_beta)
 
 

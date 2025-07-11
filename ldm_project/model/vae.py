@@ -15,17 +15,17 @@ class Encoder(nn.Module):
         self.downblocks = nn.ModuleList(
             [
                 DownBlock(64, 128, attention=False),  # shape: (B, 128, H/2, W/2)
-                DownBlock(128, 128, attention=False),  # shape: (B, 256, H/4, W/4)
-                DownBlock(128, 128, attention=False),  # shape: (B, 256, H/8, W/8)
+                DownBlock(128, 256, attention=False),  # shape: (B, 256, H/4, W/4)
+                DownBlock(256, 512, attention=False),  # shape: (B, 256, H/8, W/8)
             ]
         )  # shape: (B, 256, H/8, W/8)
         self.midblocks = nn.ModuleList(
             [
-                MidBlock(128, 128, attention=True),  # shape: (B, 256, H/8, W/8)
+                MidBlock(512, 512, attention=False),
             ]
         )
-        self.norm_out = nn.GroupNorm(32, 128)
-        self.conv_out = nn.Conv2d(128, 2 * latent_dim, kernel_size=3, padding=1)
+        self.norm_out = nn.GroupNorm(32, 512)
+        self.conv_out = nn.Conv2d(512, 2 * latent_dim, kernel_size=3, padding=1)
         self.pre_quant_conv = nn.Conv2d(2 * latent_dim, 2 * latent_dim, kernel_size=1)
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor, list[Tensor]]:
@@ -60,22 +60,21 @@ class Decoder(nn.Module):
         super().__init__()
         # input shape: (B, latent_dim, H/8, W/8)
         self.post_quant_conv = nn.Conv2d(latent_dim, latent_dim, kernel_size=1)
-        self.conv_in = nn.Conv2d(latent_dim, 128, kernel_size=3, padding=1)
+        self.conv_in = nn.Conv2d(latent_dim, 512, kernel_size=3, padding=1)
         self.midblocks = nn.ModuleList(
             [
-                MidBlock(128, 128, attention=True),  # shape: (B, 256, H/8, W/8)
+                MidBlock(512, 512, attention=False),  # shape: (B, 256, H/8, W/8)
             ]
         )  # shape: (B, 128, H, W)
         self.upblocks = nn.ModuleList(
             [
-                UpBlock(128, 128, use_skip=False, attention=False),
-                UpBlock(128, 128, use_skip=False, attention=False),
-                UpBlock(128, 128, use_skip=False, attention=False),
+                UpBlock(512, 256, use_skip=False, attention=False),
+                UpBlock(256, 128, use_skip=False, attention=False),
+                UpBlock(128, 64, use_skip=False, attention=False),
             ]
         )  # final shape: (B, 128, H*8, W*8)
-        # TODO: should fix use skip issue
-        self.norm_out = nn.GroupNorm(32, 128)
-        self.conv_out = nn.Conv2d(128, out_channels, kernel_size=3, padding=1)
+        self.norm_out = nn.GroupNorm(8, 64)
+        self.conv_out = nn.Conv2d(64, out_channels, kernel_size=3, padding=1)
 
     def forward(self, z: Tensor, res_outs: list[Tensor]) -> Tensor:
         assert isinstance(z, torch.Tensor), "Input z must be a torch.Tensor"
@@ -114,8 +113,8 @@ class VAE(nn.Module):
 
 if __name__ == "__main__":
     # Example usage
-    x = torch.randn(1, 3, 64, 64)  # Example input tensor
-    vae = VAE(in_channels=3, latent_dim=128)
+    x = torch.randn(1, 1, 512, 512)  # Example input tensor
+    vae = VAE(in_channels=1, latent_dim=128)
 
     reconstructed_x, latent = vae(x)
     print(reconstructed_x.shape)  # Should be (1, 3, 64, 64)
