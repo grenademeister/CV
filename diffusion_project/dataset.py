@@ -1,9 +1,12 @@
-# dataset.py
+# dataset_mri.py
 from pathlib import Path
 from typing import Optional
 import struct
 
+from glob import glob
+import os
 from PIL import Image
+from scipy.io import loadmat
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
@@ -15,13 +18,13 @@ import torch.nn.functional as F
 
 
 class DataSet(Dataset):
-    """MNIST dataset loader"""
+    """MRI dataset Loader"""
 
     def __init__(
         self,
         root: str,
         split: str = "train",
-        image_size: tuple[int, int] = (28, 28),
+        image_size: tuple[int, int] = (512, 512),
         train_ratio: float = 0.8,
         transforms: Optional[T.Compose] = None,
     ):
@@ -35,106 +38,54 @@ class DataSet(Dataset):
             ]
         )
 
-        # Load MNIST data
-        if split in ("train", "val"):
-            # Load full training dataset
-            full_images = self._load_images(self.root / "train-images.idx3-ubyte")
-            full_labels = self._load_labels(self.root / "train-labels.idx1-ubyte")
+        self.image_refs = []  # List of (file_path, index) tuples
+        full_data = glob(os.path.join(self.root, "*.mat"))
+        # print(f"Found {len(full_data)} .mat files in {self.root}")
+        for file in full_data:
+            # Assume each file has 6 images as before
+            for idx in range(6):
+                self.image_refs.append((file, idx))
 
-            # Split training data into train and validation using sklearn
-            train_images, val_images, train_labels, val_labels = train_test_split(
-                full_images,
-                full_labels,
-                train_size=train_ratio,
-                random_state=42,
-                stratify=full_labels,
-            )
+    def _load_mri_trimaps(self, file_path):
+        data = self._load_mat_file(file_path)
+        if data is not None:
+            img1 = data["img1"]
+            img2 = data["img2"]
+            return [img1[0], img1[1], img1[2], img2[0], img2[1], img2[2]]
 
-            if split == "train":
-                self.images = train_images
-                self.labels = train_labels
-            else:  # val
-                self.images = val_images
-                self.labels = val_labels
+    def _load_mat_file(self, file_path):
+        try:
+            data = loadmat(file_path)
+            return data
+        except Exception as e:
+            print(f"An error occurred while loading the .mat file: {e}")
+            return None
 
-        else:  # test
-            self.images = self._load_images(self.root / "t10k-images.idx3-ubyte")
-            self.labels = self._load_labels(self.root / "t10k-labels.idx1-ubyte")
+    def __len__(self):
+        return len(self.image_refs)
 
-    def _load_images(self, filepath: Path) -> np.ndarray:
-        """Load MNIST images from idx3-ubyte file"""
-        with open(filepath, "rb") as f:
-            # Read header
-            magic, num_images, rows, cols = struct.unpack(">IIII", f.read(16))
-            assert magic == 2051, f"Invalid magic number: {magic}"
-
-            # Read image data
-            images = np.frombuffer(f.read(), dtype=np.uint8)
-            images = images.reshape(num_images, rows, cols)
-
-        return images
-
-    def _load_labels(self, filepath: Path) -> np.ndarray:
-        """Load MNIST labels from idx1-ubyte file"""
-        with open(filepath, "rb") as f:
-            # Read header
-            magic, num_labels = struct.unpack(">II", f.read(8))
-            assert magic == 2049, f"Invalid magic number: {magic}"
-
-            # Read label data
-            labels = np.frombuffer(f.read(), dtype=np.uint8)
-
-        return labels
-
-    def __len__(self) -> int:
-        return len(self.images)
-
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        # Get image and label
-        image = self.images[idx]
-        label = self.labels[idx]
-
-        # Convert to PIL Image and apply transforms
-        pil_image = Image.fromarray(image, mode="L")
-        image_tensor = self.transforms(pil_image)
-
-        # Ensure we have a tensor (ToTensor() in transforms guarantees this)
-        assert isinstance(image_tensor, torch.Tensor)
-        image_tensor = F.pad(
-            image_tensor, (2, 2, 2, 2), mode="constant", value=0
-        )  # Pad to 32x32
-
-        # Convert label to tensor
-        label_tensor = torch.tensor(label, dtype=torch.long)
-
-        return image_tensor, label_tensor
+    def __getitem__(self, idx):
+        file_path, img_idx = self.image_refs[idx]
+        trimaps = self._load_mri_trimaps(file_path)
+        if trimaps is None:
+            raise RuntimeError(f"Failed to load trimaps from {file_path}")
+        image = trimaps[img_idx]
+        image = Image.fromarray(image.astype(np.float32))
+        if self.transforms:
+            image = self.transforms(image)
+        return image, 0
 
 
 if __name__ == "__main__":
-    # Test the dataset
-    dataset = DataSet(root="mnist", split="train", image_size=(28, 28))
-    print(f"Training dataset size: {len(dataset)}")
+    dataset = DataSet(root="../data/data_v2_slice_512/train/", split="train")
+    print(f"dataset initialized with {len(dataset)} images.")
+    # print(f"Number of images in dataset: {len(dataset)}")
 
-    val_dataset = DataSet(root="mnist", split="val", image_size=(28, 28))
-    print(f"Validation dataset size: {len(val_dataset)}")
-
-    test_dataset = DataSet(root="mnist", split="test", image_size=(28, 28))
-    print(f"Test dataset size: {len(test_dataset)}")
-
-    # Test loading a sample
-    img, label = dataset[0]
-    print(f"Image shape: {img.shape}, Label: {label.item()}")
-    print(f"Image dtype: {img.dtype}, Label dtype: {label.dtype}")
-    print(f"Image range: {img.min():.3f} to {img.max():.3f}")
-
-    # Simple visualization
-    plt.figure(figsize=(6, 2))
-    for i in range(5):
-        img_sample, label_sample = dataset[i]
-        plt.subplot(1, 5, i + 1)
-        plt.imshow(img_sample.squeeze(), cmap="gray")
-        plt.title(f"{label_sample.item()}")
-        plt.axis("off")
-
-    plt.tight_layout()
-    plt.show()
+    # Display the first image
+    first_image, dummy = dataset[0]
+    if isinstance(first_image, torch.Tensor):
+        first_image = first_image.squeeze().numpy()  # Remove channel dimension
+        print("First image shape:", first_image.shape)
+    plt.imshow(first_image, cmap="gray")
+    plt.axis("off")
+    plt.savefig("example.png")

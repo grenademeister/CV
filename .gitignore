@@ -16,6 +16,8 @@
 /ldm_project/data/
 /ldm_project/mnist/
 
+diffusion_project/mnist/
+
 *.log
 *.pth
 *.tar.gz

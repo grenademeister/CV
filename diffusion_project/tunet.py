@@ -27,7 +27,10 @@ class TimeUnet(nn.Module):
         self.down_blocks = nn.ModuleList(
             [
                 TimeDownBlock(
-                    down_channels[i], down_channels[i + 1], time_emb_dim, attention=True
+                    down_channels[i],
+                    down_channels[i + 1],
+                    time_emb_dim,
+                    attention=False,
                 )
                 for i in range(num_pool_layers)
             ]
@@ -42,7 +45,10 @@ class TimeUnet(nn.Module):
         self.up_blocks = nn.ModuleList(
             [
                 TimeUpBlock(
-                    up_channels[i], up_channels[i + 1], time_emb_dim, attention=True
+                    up_channels[i],
+                    up_channels[i + 1],
+                    time_emb_dim,
+                    attention=False,
                 )
                 for i in range(num_pool_layers)
             ]

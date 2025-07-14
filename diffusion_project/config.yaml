@@ -8,8 +8,8 @@ device: cuda:0
 
 # Paths to datasets
 data:
-  train_path: mnist
-  val_path:   mnist
+  train_path: /fast_storage/hyeokgi/data_v2_slice_512/train
+  val_path:   ~/data_v2_slice_512/val
 
 
 # Model specification
@@ -27,7 +27,7 @@ loss:
 optimizer:
   type: Adam
   params:
-    lr:           0.0005
+    lr:           0.0001
     weight_decay: 0.0001
 
 # Learning‐rate scheduler (optional)
@@ -40,7 +40,7 @@ scheduler:
 # Training parameters
 training:
   epochs:                     50
-  batch_size:                 128
+  batch_size:                 8
   num_workers:                1
   resume:                     false
   early_stopping_patience:    10

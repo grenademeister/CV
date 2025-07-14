@@ -25,7 +25,7 @@ class Diffusion(nn.Module):
             in_chans=1,
             out_chans=1,
             chans=64,
-            num_pool_layers=3,
+            num_pool_layers=4,
             time_emb_dim=256,
         )
         self.timesteps: int = 1000
