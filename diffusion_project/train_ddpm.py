@@ -17,6 +17,7 @@ from callback import (
     EarlyStopping,
     CheckpointResume,
     ModelCheckpoint,
+    ImageSampler,
 )
 
 
@@ -92,6 +93,8 @@ class Trainer:
             num_workers=t_cfg["num_workers"],
         )
         self.logger.info("Data loaders ready.")
+        self.logger.info(f"Train dataset size: {len(train_ds)}")
+        self.logger.info(f"Validation dataset size: {len(val_ds)}")
 
     def _build_model(self):
         self.model = Model(**self.config["model"]["params"]).to(self.device)
@@ -178,7 +181,7 @@ class Trainer:
         self.model.eval()
         total_loss = 0.0
         with torch.no_grad():
-            for x, y in self.val_loader:
+            for i, (x, y) in enumerate(self.val_loader):
                 x, y = x.to(self.device), y.to(self.device)
 
                 preds, target = self.model(x)
@@ -221,6 +224,12 @@ class Trainer:
                 save_every_n_epochs=self.config["logging"]["checkpoint_save_interval"],
             )
         )
+        # self.callbacks.append(
+        #     ImageSampler(
+        #         sample_dir=self.config["logging"]["sample_dir"],
+        #         sample_interval=self.config["logging"]["sample_interval"],
+        #     )
+        # )
 
         # Start training
         for cb in self.callbacks:

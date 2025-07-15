@@ -9,7 +9,7 @@ device: cuda:0
 # Paths to datasets
 data:
   train_path: /fast_storage/hyeokgi/data_v2_slice_512/train
-  val_path:   ~/data_v2_slice_512/val
+  val_path:   /home/intern2/data_v2_slice_512/valid
 
 
 # Model specification
@@ -39,17 +39,19 @@ scheduler:
 
 # Training parameters
 training:
-  epochs:                     50
+  resume:                     true
+  epochs:                     500
   batch_size:                 8
   num_workers:                1
-  resume:                     false
-  early_stopping_patience:    10
-  parallel:                  true # use multiple GPUs if available
+  early_stopping_patience:    100
+  parallel:                   true # use multiple GPUs if available
 
 # Logging & checkpointing
 logging:
   log_dir:        ./var/logs
   checkpoint_dir: ./var/checkpoints
+  sample_dir:     ./var/samples
+  sample_interval: 10          # save samples every 1 epochs
   checkpoint_save_interval: 5
   level:          INFO
   log_interval:   50

@@ -1,20 +1,16 @@
 # dataset_mri.py
 from pathlib import Path
 from typing import Optional
-import struct
-
 from glob import glob
 import os
-from PIL import Image
 from scipy.io import loadmat
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split
-
+from numpy import ndarray
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms as T
-import torch.nn.functional as F
+import matplotlib.pyplot as plt
+from PIL import Image
 
 
 class DataSet(Dataset):
@@ -35,6 +31,10 @@ class DataSet(Dataset):
             [
                 T.Resize(self.image_size),
                 T.ToTensor(),
+                # Normalize to [0, 1] range
+                T.Lambda(lambda x: (x - x.min()) / (x.max() - x.min())),
+                # scale to [-1,1] range
+                T.Lambda(lambda x: (x - 0.5) * 2),
             ]
         )
 
@@ -43,49 +43,61 @@ class DataSet(Dataset):
         # print(f"Found {len(full_data)} .mat files in {self.root}")
         for file in full_data:
             # Assume each file has 6 images as before
-            for idx in range(6):
+            for idx in range(2):
                 self.image_refs.append((file, idx))
 
     def _load_mri_trimaps(self, file_path):
-        data = self._load_mat_file(file_path)
-        if data is not None:
-            img1 = data["img1"]
-            img2 = data["img2"]
-            return [img1[0], img1[1], img1[2], img2[0], img2[1], img2[2]]
-
-    def _load_mat_file(self, file_path):
         try:
             data = loadmat(file_path)
-            return data
+            img1 = data.get("img1_reg")
+            img2 = data.get("img2")
+            if img1 is None or img2 is None:
+                print(f"Missing keys in {file_path}")
+                return None
+            return [img1[1], img2[1]]
         except Exception as e:
-            print(f"An error occurred while loading the .mat file: {e}")
+            print(f"Error loading {file_path}: {e}")
             return None
 
     def __len__(self):
         return len(self.image_refs)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> tuple[torch.Tensor, int]:
         file_path, img_idx = self.image_refs[idx]
         trimaps = self._load_mri_trimaps(file_path)
-        if trimaps is None:
-            raise RuntimeError(f"Failed to load trimaps from {file_path}")
-        image = trimaps[img_idx]
-        image = Image.fromarray(image.astype(np.float32))
-        if self.transforms:
-            image = self.transforms(image)
+        if trimaps is None or img_idx >= len(trimaps):
+            return torch.zeros(1, *self.image_size, dtype=torch.float32), 0
+
+        image = trimaps[img_idx].astype(np.float32)
+        if np.isnan(image).any() or np.max(image) < 1e-6:
+            return torch.zeros(1, *self.image_size, dtype=torch.float32), 0
+
+        # Remove manual normalization, just convert to PIL and apply transforms
+        image = Image.fromarray(image)
+        image = self.transforms(image)
+        if not isinstance(image, torch.Tensor):
+            raise TypeError(
+                f"Expected image to be a torch.Tensor, got {type(image)} instead."
+            )
         return image, 0
 
 
 if __name__ == "__main__":
-    dataset = DataSet(root="../data/data_v2_slice_512/train/", split="train")
+    dataset = DataSet(
+        root="/fast_storage/hyeokgi/data_v2_slice_512/train", split="train"
+    )
     print(f"dataset initialized with {len(dataset)} images.")
     # print(f"Number of images in dataset: {len(dataset)}")
 
     # Display the first image
     first_image, dummy = dataset[0]
     if isinstance(first_image, torch.Tensor):
-        first_image = first_image.squeeze().numpy()  # Remove channel dimension
+        first_image = first_image.squeeze()  # Remove channel dimension
         print("First image shape:", first_image.shape)
+    print("max, min, mean, std")
+    print(
+        f"max: {first_image.max()}, min: {first_image.min()}, mean: {first_image.mean()}, std: {first_image.std()}"
+    )
     plt.imshow(first_image, cmap="gray")
     plt.axis("off")
     plt.savefig("example.png")

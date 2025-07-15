@@ -2,6 +2,8 @@ import os
 import torch
 import torch.nn.functional as F
 from typing import Dict, List
+import matplotlib.pyplot as plt
+import torchvision
 
 
 # === Callback system ===
@@ -86,8 +88,8 @@ class ModelCheckpoint(Callback):
     def __init__(
         self,
         checkpoint_dir: str,
-        save_optimizer: bool = False,
-        save_scheduler: bool = False,
+        save_optimizer: bool = True,
+        save_scheduler: bool = True,
         save_every_n_epochs: int = 1,
         save_best: bool = True,
         monitor: str = "val_loss",
@@ -156,3 +158,20 @@ class ModelCheckpoint(Callback):
                 trainer.scheduler.state_dict(),
                 os.path.join(self.checkpoint_dir, f"{prefix}_sch_{epoch}.pth"),
             )
+
+
+class ImageSampler(Callback):
+    def __init__(self, sample_dir: str = "./var/samples", sample_interval: int = 1):
+        self.sample_dir = sample_dir
+        self.sample_interval = sample_interval
+
+    def on_epoch_begin(self, trainer, epoch):
+        if (epoch + 1) % self.sample_interval == 0:
+            os.makedirs(self.sample_dir, exist_ok=True)
+            # Sample images from the model
+            samples = trainer.model.module.recon(out_size=(4, 1, 512, 512), interval=1)
+            grid = torchvision.utils.make_grid(
+                samples, nrow=2, normalize=True, value_range=(-1, 1)
+            )
+            plt.imsave("out.png", grid.squeeze().permute(1, 2, 0).numpy(), cmap="gray")
+            trainer.logger.info(f"Sampled images saved for epoch {epoch}.")
