@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from typing import Dict, List
 import matplotlib.pyplot as plt
 import torchvision
+import numpy as np
 
 
 # === Callback system ===
@@ -57,7 +58,9 @@ class CheckpointResume(Callback):
         files = [
             f
             for f in os.listdir(self.checkpoint_dir)
-            if f.startswith("epoch_") and f.endswith(".pth")
+            if f.startswith("epoch_")
+            and f.endswith(".pth")
+            and not ("_opt_" in f or "_sch_" in f)
         ]
         if not files:
             return
@@ -67,19 +70,22 @@ class CheckpointResume(Callback):
         trainer.model.load_state_dict(
             torch.load(model_path, map_location=trainer.device)
         )
+        trainer.logger.info(f"Model loaded from {model_path}")
         # load optimizer state
-        opt_path = os.path.join(self.checkpoint_dir, f"opt_{last}.pth")
+        opt_path = os.path.join(self.checkpoint_dir, f"epoch_opt_{last}.pth")
         if os.path.exists(opt_path):
             trainer.optimizer.load_state_dict(
                 torch.load(opt_path, map_location=trainer.device)
             )
+            trainer.logger.info(f"Optimizer loaded from {opt_path}")
         # load scheduler state
         if trainer.scheduler:
-            sch_path = os.path.join(self.checkpoint_dir, f"sch_{last}.pth")
+            sch_path = os.path.join(self.checkpoint_dir, f"epoch_sch_{last}.pth")
             if os.path.exists(sch_path):
                 trainer.scheduler.load_state_dict(
                     torch.load(sch_path, map_location=trainer.device)
                 )
+                trainer.logger.info(f"Scheduler loaded from {sch_path}")
         trainer.start_epoch = last + 1
         trainer.logger.info(f"Resumed from epoch {last}.")
 
@@ -158,20 +164,3 @@ class ModelCheckpoint(Callback):
                 trainer.scheduler.state_dict(),
                 os.path.join(self.checkpoint_dir, f"{prefix}_sch_{epoch}.pth"),
             )
-
-
-class ImageSampler(Callback):
-    def __init__(self, sample_dir: str = "./var/samples", sample_interval: int = 1):
-        self.sample_dir = sample_dir
-        self.sample_interval = sample_interval
-
-    def on_epoch_begin(self, trainer, epoch):
-        if (epoch + 1) % self.sample_interval == 0:
-            os.makedirs(self.sample_dir, exist_ok=True)
-            # Sample images from the model
-            samples = trainer.model.module.recon(out_size=(4, 1, 512, 512), interval=1)
-            grid = torchvision.utils.make_grid(
-                samples, nrow=2, normalize=True, value_range=(-1, 1)
-            )
-            plt.imsave("out.png", grid.squeeze().permute(1, 2, 0).numpy(), cmap="gray")
-            trainer.logger.info(f"Sampled images saved for epoch {epoch}.")

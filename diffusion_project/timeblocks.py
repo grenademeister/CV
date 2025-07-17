@@ -10,7 +10,7 @@ class TimeResBlock(nn.Module):
         in_channels: int,
         out_channels: int,
         time_emb_dim: int,
-        time_injection: str = "Add",  # Options: "FiLM", "Add"
+        time_injection: str = "FiLM",  # Options: "FiLM", "Add"
     ):
         super().__init__()
         assert time_injection in ["FiLM", "Add"], "Invalid time injection method"
@@ -20,7 +20,14 @@ class TimeResBlock(nn.Module):
         self.norm1 = nn.GroupNorm(self.num_groups, out_channels)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
         self.norm2 = nn.GroupNorm(self.num_groups, out_channels)
-        self.time_mlp = nn.Sequential(nn.SiLU(), nn.Linear(time_emb_dim, out_channels))
+        self.time_mlp = nn.Sequential(
+            nn.Linear(
+                time_emb_dim,
+                out_channels * 2 if time_injection == "FiLM" else out_channels,
+            ),
+            nn.SiLU(),
+        )
+        self.activation = nn.SiLU()
         self.skip_connection = (
             nn.Conv2d(in_channels, out_channels, kernel_size=1)
             if in_channels != out_channels
@@ -32,18 +39,20 @@ class TimeResBlock(nn.Module):
 
         x = self.conv1(x)
         x = self.norm1(x)
-        x = nn.SiLU()(x)
+        x = self.activation(x)
 
         # Add time embedding
         if self.time_injection == "FiLM":
-            time_emb = self.time_mlp(time_emb).view(-1, x.size(1), 1, 1)
-            x = x * (1 + time_emb)
+            time_emb = self.time_mlp(time_emb).view(-1, x.size(1) * 2, 1, 1)
+            gamma, beta = torch.chunk(time_emb, 2, dim=1)
+            x = x * (1 + gamma) + beta
         elif self.time_injection == "Add":
             time_emb = self.time_mlp(time_emb).view(-1, x.size(1), 1, 1)
             x = x + time_emb
 
         x = self.conv2(x)
         x = self.norm2(x)
+        x = self.activation(x)
 
         return x + skip
 

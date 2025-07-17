@@ -5,16 +5,29 @@ import torch.nn as nn
 from torch import Tensor
 
 from typing import Tuple
+import math
 import itertools
 
 from tunet import TimeUnet as Unet
 
 
-def beta_scheduling(timesteps: int) -> Tensor:
+def beta_scheduling_linear(timesteps: int) -> Tensor:
+    """Linear beta schedule"""
     scale = 1000 / timesteps
     beta_start = scale * 0.0001
     beta_end = scale * 0.02
     return torch.linspace(beta_start, beta_end, timesteps, dtype=torch.float32)
+
+
+def beta_scheduling(timesteps: int) -> Tensor:
+    """Cosine beta schedule"""
+    s = 0.008  # small offset to prevent singularities
+    t = torch.linspace(0, timesteps, timesteps + 1, dtype=torch.float64) / timesteps
+    alphas_cumprod = torch.cos((t + s) / (1 + s) * math.pi / 2) ** 2
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]  # normalize to start at 1
+
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    return betas.clamp(0.0001, 0.9999).to(dtype=torch.float32)
 
 
 class Diffusion(nn.Module):

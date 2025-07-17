@@ -17,7 +17,6 @@ from callback import (
     EarlyStopping,
     CheckpointResume,
     ModelCheckpoint,
-    ImageSampler,
 )
 
 
@@ -147,6 +146,7 @@ class Trainer:
     def train_epoch(self, epoch: int) -> float:
         self.model.train()
         running_loss = 0.0
+        previous_loss = 0.0
         for i, (x, y) in enumerate(self.train_loader, 1):
             x, y = x.to(self.device), y.to(self.device)
             self.optimizer.zero_grad()
@@ -172,9 +172,15 @@ class Trainer:
                     cb.on_train_batch_end(self, preds, target)
 
             if i % self.config["logging"]["log_interval"] == 0:
+                # Log average loss every log_interval batches
+                avg_loss = (running_loss - previous_loss) / self.config["logging"][
+                    "log_interval"
+                ]
                 self.logger.info(
-                    f"Epoch {epoch} [{i}/{len(self.train_loader)}] Loss: {loss.item():.4f}"
+                    f"Epoch {epoch} Batch {i}/{len(self.train_loader)} "
+                    f"Loss: {avg_loss:.4f} (Avg: {running_loss / i:.4f})"
                 )
+                previous_loss = running_loss
         return running_loss / len(self.train_loader)
 
     def validate(self, epoch: int) -> float:
@@ -224,12 +230,6 @@ class Trainer:
                 save_every_n_epochs=self.config["logging"]["checkpoint_save_interval"],
             )
         )
-        # self.callbacks.append(
-        #     ImageSampler(
-        #         sample_dir=self.config["logging"]["sample_dir"],
-        #         sample_interval=self.config["logging"]["sample_interval"],
-        #     )
-        # )
 
         # Start training
         for cb in self.callbacks:

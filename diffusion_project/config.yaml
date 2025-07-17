@@ -41,7 +41,7 @@ scheduler:
 training:
   resume:                     true
   epochs:                     500
-  batch_size:                 8
+  batch_size:                 4
   num_workers:                1
   early_stopping_patience:    100
   parallel:                   true # use multiple GPUs if available
@@ -54,7 +54,7 @@ logging:
   sample_interval: 10          # save samples every 1 epochs
   checkpoint_save_interval: 5
   level:          INFO
-  log_interval:   50
+  log_interval:   100
   structured:     true      # emit JSON‐formatted logs
   format:         json
 

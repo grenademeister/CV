@@ -18,6 +18,8 @@
 
 diffusion_project/mnist/
 
+/diffusion_project_final
+
 *.log
 *.pth
 *.tar.gz
