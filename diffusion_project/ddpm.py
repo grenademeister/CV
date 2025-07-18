@@ -80,16 +80,18 @@ class Diffusion(nn.Module):
 
         batch_size = out_size[0]
 
-        times = torch.linspace(
-            0, self.timesteps - 1, int(self.timesteps / interval), dtype=torch.long
+        times = torch.arange(
+            0, self.timesteps, interval, device=device, dtype=torch.long
         )
-        times = list(reversed(times.int().tolist()))
+        if times[-1] != self.timesteps - 1:
+            times = torch.cat([times, times.new_tensor([self.timesteps - 1])])
+        times = list(reversed(times.tolist()))
         time_pairs = list(itertools.pairwise(times))
 
-        noise = torch.randn(out_size).to(device)
-        x_t = noise.type(torch.float32)
+        x_t = torch.randn(out_size).to(device).type(torch.float32)
 
         for time, time_next in time_pairs:
+            print(f"\rSampling at time {time} -> {time_next}", end="")
             t_batch = torch.full((batch_size,), time, device=device, dtype=torch.long)
             t_next_batch = torch.full(
                 (batch_size,), time_next, device=device, dtype=torch.long
@@ -106,18 +108,15 @@ class Diffusion(nn.Module):
                     batch_size, 1, 1, 1
                 )
                 alpha_t = self.alphas.gather(0, t_batch).view(batch_size, 1, 1, 1)
-                noise = torch.randn_like(x_t)
+                random_noise = torch.randn_like(x_t)  # Renamed to avoid collision
 
                 mu = (
                     x_t - (1 - alpha_t) / torch.sqrt(1 - a_cumprod_t) * predicted_noise
-                ) / torch.sqrt(
-                    alpha_t
-                )  # predicted mean
+                ) / torch.sqrt(alpha_t)
                 sigma = torch.sqrt(
                     (1 - alpha_t) * ((1 - a_cumprod_t_next) / (1 - a_cumprod_t))
                 )
-                x_next = mu + sigma * noise
-                x_t = x_next
+                x_t = mu + sigma * random_noise  # Direct assignment
             else:
                 # DDIM sampling (works for arbitrary step sizes)
                 a_cumprod_t = self.a_cumprod.gather(0, t_batch).view(
@@ -133,10 +132,77 @@ class Diffusion(nn.Module):
                 ) / torch.sqrt(a_cumprod_t)
 
                 # Compute x_{t-interval} using DDIM formula
-                x_next = (
+                x_t = (
                     torch.sqrt(a_cumprod_t_next) * pred_x0
                     + torch.sqrt(1 - a_cumprod_t_next) * predicted_noise
                 )
-                x_t = x_next
 
-        return x_t.type(torch.float32)
+        return x_t
+
+    @torch.inference_mode()
+    def reconstruct(self, x_t: Tensor, t: Tensor | int) -> Tensor:
+        """
+        Reconstruct the original image x0 from a noised image x_t at arbitrary timestep t.
+        """
+        device = x_t.device
+        batch_size = x_t.shape[0]
+        # Prepare timestep tensor
+        if isinstance(t, int):
+            t_batch = torch.full((batch_size,), t, device=device, dtype=torch.long)
+        else:
+            t_batch = t.to(device).long()
+            if t_batch.dim() == 0:
+                t_batch = t_batch.view(1).expand(batch_size)
+        # Network prediction of noise
+        predicted_noise = self.network(x_t, t_batch.type(torch.float32))
+        # Gather cumulative product of alphas
+        a_cumprod_t = self.a_cumprod.gather(0, t_batch).view(batch_size, 1, 1, 1)
+        # Compute predicted x0
+        pred_x0 = (x_t - torch.sqrt(1 - a_cumprod_t) * predicted_noise) / torch.sqrt(
+            a_cumprod_t
+        )
+        return pred_x0
+
+    @torch.inference_mode()
+    def denoise_step(self, x_t: Tensor, t: Tensor | int, dt: int = 1) -> Tensor:
+        """
+        Perform dt-step denoising from x_t at timestep t:
+        - If dt == 1, use the DDPM posterior.
+        - If dt > 1, use the DDIM formula for arbitrary step sizes.
+        """
+        device = x_t.device
+        batch_size = x_t.shape[0]
+        # Prepare timestep tensor
+        if isinstance(t, int):
+            t_batch = torch.full((batch_size,), t, device=device, dtype=torch.long)
+        else:
+            t_batch = t.to(device).long()
+            if t_batch.dim() == 0:
+                t_batch = t_batch.view(1).expand(batch_size)
+        # Determine target timestep
+        t_target = (t_batch - dt).clamp(min=0)
+        # Predict noise
+        predicted_noise = self.network(x_t, t_batch.type(torch.float32))
+        # Gather cumulative prods
+        a_cumprod_t = self.a_cumprod.gather(0, t_batch).view(batch_size, 1, 1, 1)
+        a_cumprod_target = self.a_cumprod.gather(0, t_target).view(batch_size, 1, 1, 1)
+        if dt == 1:
+            # DDPM posterior
+            alpha_t = self.alphas.gather(0, t_batch).view(batch_size, 1, 1, 1)
+            mu = (
+                x_t - (1 - alpha_t) / torch.sqrt(1 - a_cumprod_t) * predicted_noise
+            ) / torch.sqrt(alpha_t)
+            sigma = torch.sqrt(
+                (1 - alpha_t) * ((1 - a_cumprod_target) / (1 - a_cumprod_t))
+            )
+            noise = torch.randn_like(x_t)
+            return mu + sigma * noise
+        else:
+            # DDIM step
+            pred_x0 = (
+                x_t - torch.sqrt(1 - a_cumprod_t) * predicted_noise
+            ) / torch.sqrt(a_cumprod_t)
+            return (
+                torch.sqrt(a_cumprod_target) * pred_x0
+                + torch.sqrt(1 - a_cumprod_target) * predicted_noise
+            )
