@@ -20,10 +20,13 @@ diffusion_project/mnist/
 
 /diffusion_project_final
 
+/data_consistency
+
 *.log
 *.pth
 *.tar.gz
 *.zip
 *.pyc
+*.mat
 
 nohup.out
